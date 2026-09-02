@@ -50,7 +50,7 @@ export async function assignReportApprover(
     }
 
     const assignment = await assignApprover(
-      req.params.reportId,
+      req.params.reportId as string,
       approverId
     );
 
@@ -82,7 +82,7 @@ export async function approveExpenseReport(
     }
 
     const report = await approveReport(
-      req.params.reportId,
+      req.params.reportId as string,
       req.user.userId
     );
 
@@ -122,7 +122,7 @@ export async function rejectExpenseReport(
     }
 
     const report = await rejectReport(
-      req.params.reportId,
+      req.params.reportId as string,
       req.user.userId,
       reason
     );

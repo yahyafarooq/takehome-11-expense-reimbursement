@@ -5,6 +5,9 @@ import { createReportSchema } from "../validators/report.validator";
 import {
   createReport,
   submitReport,
+  updateReport,
+  archiveReport,
+  restoreReport,
 } from "./report.service";
 
 export async function createExpenseReport(
@@ -89,7 +92,7 @@ export async function submitExpenseReport(
     }
 
     const report = await submitReport(
-      req.params.reportId,
+      req.params.reportId as string,
       req.user.userId
     );
 
@@ -106,5 +109,99 @@ export async function submitExpenseReport(
     return res.status(400).json({
       message,
     });
+  }
+}
+
+export async function updateExpenseReport(
+  req: AuthenticatedRequest,
+  res: Response
+) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Authentication required",
+      });
+    }
+
+    const result = createReportSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: result.error.flatten(),
+      });
+    }
+
+    const report = await updateReport(
+      req.params.reportId as string,
+      req.user.userId,
+      result.data.title,
+      result.data.startDate,
+      result.data.endDate
+    );
+
+    return res.status(200).json({
+      message: "Expense report updated successfully",
+      report,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to update report";
+
+    return res.status(400).json({ message });
+  }
+}
+
+export async function archiveExpenseReport(
+  req: AuthenticatedRequest,
+  res: Response
+) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    const report = await archiveReport(
+      req.params.reportId as string,
+      req.user.userId
+    );
+
+    return res.status(200).json({
+      message: "Report archived successfully",
+      report,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to archive report";
+
+    return res.status(400).json({ message });
+  }
+}
+
+export async function restoreExpenseReport(
+  req: AuthenticatedRequest,
+  res: Response
+) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    const report = await restoreReport(
+      req.params.reportId as string,
+      req.user.userId
+    );
+
+    return res.status(200).json({
+      message: "Report restored successfully",
+      report,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to restore report";
+
+    return res.status(400).json({ message });
   }
 }

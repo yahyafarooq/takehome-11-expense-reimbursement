@@ -71,3 +71,87 @@ export async function submitReport(
 
   return updatedReport;
 }
+
+export async function updateReport(
+  reportId: string,
+  userId: string,
+  title: string,
+  startDate: string,
+  endDate: string
+) {
+  const report = await prisma.expenseReport.findUnique({
+    where: { id: reportId },
+  });
+
+  if (!report) {
+    throw new Error("Expense report not found");
+  }
+
+  if (report.ownerId !== userId) {
+    throw new Error("You do not have permission to edit this report");
+  }
+
+  if (report.status !== "DRAFT") {
+    throw new Error("Only draft reports can be edited");
+  }
+
+  const parsedStartDate = new Date(startDate);
+  const parsedEndDate = new Date(endDate);
+
+  if (parsedEndDate < parsedStartDate) {
+    throw new Error("End date cannot be before start date");
+  }
+
+  return prisma.expenseReport.update({
+    where: { id: reportId },
+    data: {
+      title,
+      startDate: parsedStartDate,
+      endDate: parsedEndDate,
+    },
+  });
+}
+
+export async function archiveReport(
+  reportId: string,
+  userId: string
+) {
+  const report = await prisma.expenseReport.findUnique({
+    where: { id: reportId },
+  });
+
+  if (!report) {
+    throw new Error("Expense report not found");
+  }
+
+  if (report.ownerId !== userId) {
+    throw new Error("You do not have permission to archive this report");
+  }
+
+  return prisma.expenseReport.update({
+    where: { id: reportId },
+    data: { archived: true },
+  });
+}
+
+export async function restoreReport(
+  reportId: string,
+  userId: string
+) {
+  const report = await prisma.expenseReport.findUnique({
+    where: { id: reportId },
+  });
+
+  if (!report) {
+    throw new Error("Expense report not found");
+  }
+
+  if (report.ownerId !== userId) {
+    throw new Error("You do not have permission to restore this report");
+  }
+
+  return prisma.expenseReport.update({
+    where: { id: reportId },
+    data: { archived: false },
+  });
+}

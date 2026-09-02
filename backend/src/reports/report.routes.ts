@@ -5,6 +5,9 @@ import {
   createExpenseReport,
   getMyReports,
   submitExpenseReport,
+  updateExpenseReport,
+  archiveExpenseReport,
+  restoreExpenseReport,
 } from "./report.controller";
 
 const router = Router();
@@ -28,6 +31,27 @@ router.post(
   authenticate,
   requireRole("EMPLOYEE"),
   submitExpenseReport
+);
+
+router.patch(
+  "/:reportId",
+  authenticate,
+  requireRole("EMPLOYEE"),
+  updateExpenseReport
+);
+
+router.patch(
+  "/:reportId/archive",
+  authenticate,
+  requireRole("EMPLOYEE"),
+  archiveExpenseReport
+);
+
+router.patch(
+  "/:reportId/restore",
+  authenticate,
+  requireRole("EMPLOYEE"),
+  restoreExpenseReport
 );
 
 export default router;

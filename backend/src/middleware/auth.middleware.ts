@@ -32,7 +32,10 @@ export function authenticate(
       });
     }
 
-    const decoded = jwt.verify(token, secret);
+    const decoded = jwt.verify(token as string, secret) as {
+      userId: string;
+      role: "EMPLOYEE" | "APPROVER";
+    };
 
     if (
       typeof decoded !== "object" ||
