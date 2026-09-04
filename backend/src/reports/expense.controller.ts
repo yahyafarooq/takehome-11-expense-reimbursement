@@ -29,6 +29,7 @@ export async function addExpenseLine(
 
     const expense = await createExpenseLine(
       req.params.reportId as string,
+      req.user.userId,
       result.data
     );
 

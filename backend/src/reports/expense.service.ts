@@ -1,8 +1,10 @@
 import prisma from "../lib/prisma";
+
 import { CreateExpenseLineInput } from "../validators/expense.validator";
 
 export async function createExpenseLine(
   reportId: string,
+  userId: string,
   input: CreateExpenseLineInput
 ) {
   const report = await prisma.expenseReport.findUnique({
@@ -11,6 +13,10 @@ export async function createExpenseLine(
 
   if (!report) {
     throw new Error("Expense report not found");
+  }
+
+  if (report.ownerId !== userId) {
+    throw new Error("You do not have permission");
   }
 
   if (report.status !== "DRAFT") {
@@ -59,8 +65,14 @@ export async function updateExpenseLine(
     where: { id: reportId },
   });
 
-  if (!report) throw new Error("Expense report not found");
-  if (report.ownerId !== userId) throw new Error("You do not have permission");
+  if (!report) {
+    throw new Error("Expense report not found");
+  }
+
+  if (report.ownerId !== userId) {
+    throw new Error("You do not have permission");
+  }
+
   if (report.status !== "DRAFT") {
     throw new Error("Only draft reports can be edited");
   }
@@ -69,7 +81,9 @@ export async function updateExpenseLine(
     where: { id: expenseId, reportId },
   });
 
-  if (!expense) throw new Error("Expense line not found");
+  if (!expense) {
+    throw new Error("Expense line not found");
+  }
 
   const updated = await prisma.expenseLine.update({
     where: { id: expenseId },
@@ -103,8 +117,14 @@ export async function deleteExpenseLine(
     where: { id: reportId },
   });
 
-  if (!report) throw new Error("Expense report not found");
-  if (report.ownerId !== userId) throw new Error("You do not have permission");
+  if (!report) {
+    throw new Error("Expense report not found");
+  }
+
+  if (report.ownerId !== userId) {
+    throw new Error("You do not have permission");
+  }
+
   if (report.status !== "DRAFT") {
     throw new Error("Only draft reports can be edited");
   }
@@ -113,7 +133,9 @@ export async function deleteExpenseLine(
     where: { id: expenseId, reportId },
   });
 
-  if (!expense) throw new Error("Expense line not found");
+  if (!expense) {
+    throw new Error("Expense line not found");
+  }
 
   await prisma.expenseLine.delete({
     where: { id: expenseId },

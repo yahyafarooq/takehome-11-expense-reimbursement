@@ -1,5 +1,16 @@
 import prisma from "../lib/prisma";
 
+export interface ReportSearchOptions {
+  search?: string;
+  status?: "DRAFT" | "SUBMITTED" | "APPROVED" | "PAID";
+  ownerId?: string;
+  approverId?: string;
+  sortBy?: "submittedAt" | "status" | "total";
+  sortOrder?: "asc" | "desc";
+  page?: number;
+  pageSize?: number;
+}
+
 export async function getSubmittedReports() {
   return prisma.expenseReport.findMany({
     where: {
@@ -204,5 +215,202 @@ export async function markReportAsPaid(
     });
 
     return updatedReport;
+  });
+}
+
+export async function getAssignedSubmittedReports(approverId: string) {
+  return prisma.expenseReport.findMany({
+    where: {
+      status: "SUBMITTED",
+      archived: false,
+      approvers: {
+        some: {
+          approverId,
+        },
+      },
+    },
+    include: {
+      owner: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+      expenseLines: true,
+      approvers: {
+        include: {
+          approver: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: {
+      submittedAt: "asc",
+    },
+  });
+}
+
+export async function searchReports(options: ReportSearchOptions) {
+  const {
+    search,
+    status,
+    ownerId,
+    approverId,
+    sortBy = "submittedAt",
+    sortOrder = "desc",
+    page = 1,
+    pageSize = 10,
+  } = options;
+
+  const where: any = {
+    archived: false,
+  };
+
+  if (search) {
+    where.title = {
+      contains: search,
+      mode: "insensitive",
+    };
+  }
+
+  if (status) {
+    where.status = status;
+  }
+
+  if (ownerId) {
+    where.ownerId = ownerId;
+  }
+
+  if (approverId) {
+    where.approvers = {
+      some: {
+        approverId,
+      },
+    };
+  }
+
+  const skip = (page - 1) * pageSize;
+
+  const orderBy: any = {
+    [sortBy]: sortOrder,
+  };
+
+  const [reports, total] = await prisma.$transaction([
+    prisma.expenseReport.findMany({
+      where,
+      include: {
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        expenseLines: true,
+        approvers: {
+          include: {
+            approver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy,
+      skip,
+      take: pageSize,
+    }),
+    prisma.expenseReport.count({ where }),
+  ]);
+
+  return {
+    reports,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    },
+  };
+}
+
+export async function bulkUpdateReports(
+  reportIds: string[],
+  approverId: string,
+  action: "APPROVE" | "REJECT",
+  reason?: string
+) {
+  const results = [];
+
+  for (const reportId of reportIds) {
+    try {
+      if (action === "APPROVE") {
+        const report = await approveReport(reportId, approverId);
+
+        results.push({
+          reportId,
+          success: true,
+          status: "APPROVED",
+          report,
+        });
+      } else {
+        if (!reason || !reason.trim()) {
+          throw new Error("Rejection reason is required");
+        }
+
+        const report = await rejectReport(
+          reportId,
+          approverId,
+          reason
+        );
+
+        results.push({
+          reportId,
+          success: true,
+          status: "DRAFT",
+          report,
+        });
+      }
+    } catch (error) {
+      results.push({
+        reportId,
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to update report",
+      });
+    }
+  }
+
+  return results;
+}
+
+export async function getApprovedReportsForPayment() {
+  return prisma.expenseReport.findMany({
+    where: {
+      status: "APPROVED",
+      archived: false,
+    },
+    include: {
+      owner: {
+        select: {
+          name: true,
+          email: true,
+        },
+      },
+    },
+    orderBy: {
+      submittedAt: "asc",
+    },
   });
 }
