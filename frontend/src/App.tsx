@@ -38,6 +38,22 @@ interface Report {
     name: string;
     email: string;
   };
+  approvers?: {
+    id: string;
+    approverId: string;
+    assignedAt?: string;
+    approver: {
+      id: string;
+      name: string;
+      email: string;
+    };
+  }[];
+}
+
+interface Approver {
+  id: string;
+  name: string;
+  email: string;
 }
 
 interface Dashboard {
@@ -118,10 +134,21 @@ function App() {
   const [password, setPassword] = useState("Password123");
 
   const [reports, setReports] = useState<Report[]>([]);
+  const [archivedReports, setArchivedReports] = useState<Report[]>(
+    []
+  );
+
   const [dashboard, setDashboard] =
     useState<Dashboard | null>(null);
 
   const [alerts, setAlerts] = useState<Alert[]>([]);
+
+  /* Goal 5 - Approver queues and assignments */
+  const [approvers, setApprovers] = useState<Approver[]>([]);
+  const [queue, setQueue] = useState<"ALL" | "ASSIGNED">("ALL");
+  const [selectedApprover, setSelectedApprover] = useState<
+    Record<string, string>
+  >({});
 
   /* Create report */
   const [title, setTitle] = useState("");
@@ -205,6 +232,7 @@ function App() {
     setToken("");
     setDashboard(null);
     setReports([]);
+    setArchivedReports([]);
     setAlerts([]);
     setMessage("");
   }
@@ -212,18 +240,41 @@ function App() {
   async function loadReports() {
     try {
       if (role === "APPROVER") {
-        const response = await api.get("/approvals/search");
+        const endpoint =
+          queue === "ASSIGNED"
+            ? "/approvals/submitted/assigned"
+            : "/approvals/submitted";
+
+        const response = await api.get(endpoint);
 
         setReports(response.data.reports || []);
+        setArchivedReports([]);
       } else {
         const response = await api.get("/reports/my");
 
         setReports(response.data.reports || []);
+        setArchivedReports(
+          response.data.archivedReports || []
+        );
       }
     } catch (error: any) {
       setMessage(
         error.response?.data?.message ||
           "Failed to load reports"
+      );
+    }
+  }
+
+  async function loadApprovers() {
+    if (role !== "APPROVER") return;
+
+    try {
+      const response = await api.get("/auth/approvers");
+      setApprovers(response.data.approvers || []);
+    } catch (error: any) {
+      setMessage(
+        error.response?.data?.message ||
+          "Failed to load approvers"
       );
     }
   }
@@ -568,6 +619,34 @@ function App() {
     }
   }
 
+  async function assignApproverToReport(reportId: string) {
+    const approverId = selectedApprover[reportId];
+
+    if (!approverId) {
+      setMessage("Please select an approver");
+      return;
+    }
+
+    try {
+      await api.post(`/approvals/${reportId}/approvers`, {
+        approverId,
+      });
+
+      setSelectedApprover((current) => ({
+        ...current,
+        [reportId]: "",
+      }));
+
+      setMessage("Approver assigned successfully");
+      await loadReports();
+    } catch (error: any) {
+      setMessage(
+        error.response?.data?.message ||
+          "Failed to assign approver"
+      );
+    }
+  }
+
   async function approveReport(reportId: string) {
     try {
       await api.patch(
@@ -656,10 +735,11 @@ function App() {
     loadReports();
 
     if (role === "APPROVER") {
+      loadApprovers();
       loadDashboard();
       loadAlerts();
     }
-  }, [token, role]);
+  }, [token, role, queue]);
 
   if (!token) {
     return (
@@ -862,7 +942,7 @@ function App() {
         <div className="panel-header">
           <h2>
             {role === "APPROVER"
-              ? "All Expense Reports"
+              ? "Submitted Expense Reports"
               : "My Expense Reports"}
           </h2>
 
@@ -870,6 +950,31 @@ function App() {
             Refresh
           </button>
         </div>
+
+        {role === "APPROVER" && (
+          <div className="actions">
+            <button
+              onClick={() => setQueue("ALL")}
+              disabled={queue === "ALL"}
+            >
+              All Submitted
+            </button>
+            <button
+              onClick={() => setQueue("ASSIGNED")}
+              disabled={queue === "ASSIGNED"}
+            >
+              My Assigned
+            </button>
+          </div>
+        )}
+
+        {role === "APPROVER" && (
+          <p>
+            {queue === "ALL"
+              ? "Showing every submitted report."
+              : "Showing submitted reports assigned to you."}
+          </p>
+        )}
 
         {reports.length === 0 ? (
           <p>No reports found.</p>
@@ -1365,6 +1470,71 @@ function App() {
                     </div>
                   )}
 
+                {/* ================= APPROVER ASSIGNMENTS ================= */}
+
+                {role === "APPROVER" &&
+                  report.status === "SUBMITTED" && (
+                    <div className="panel">
+                      <h4>Assigned Approvers</h4>
+
+                      {report.approvers &&
+                      report.approvers.length > 0 ? (
+                        <ul>
+                          {report.approvers.map((assignment) => (
+                            <li key={assignment.id}>
+                              {assignment.approver.name} (
+                              {assignment.approver.email})
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p>No approvers assigned yet.</p>
+                      )}
+
+                      <div className="form-row">
+                        <select
+                          value={selectedApprover[report.id] || ""}
+                          onChange={(e) =>
+                            setSelectedApprover((current) => ({
+                              ...current,
+                              [report.id]: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">
+                            Select approver
+                          </option>
+
+                          {approvers
+                            .filter(
+                              (approver) =>
+                                !report.approvers?.some(
+                                  (assignment) =>
+                                    assignment.approverId ===
+                                    approver.id
+                                )
+                            )
+                            .map((approver) => (
+                              <option
+                                key={approver.id}
+                                value={approver.id}
+                              >
+                                {approver.name} ({approver.email})
+                              </option>
+                            ))}
+                        </select>
+
+                        <button
+                          onClick={() =>
+                            assignApproverToReport(report.id)
+                          }
+                        >
+                          Assign Approver
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                 {/* ================= APPROVER ACTIONS ================= */}
 
                 {role === "APPROVER" && (
@@ -1408,10 +1578,62 @@ function App() {
                     )}
                   </div>
                 )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
-                {/* ================= RESTORE ================= */}
+      {/* ================= ARCHIVED REPORTS ================= */}
 
-                {report.archived && (
+      {role === "EMPLOYEE" && (
+        <section className="panel">
+          <div className="panel-header">
+            <h2>Archived Reports</h2>
+          </div>
+
+          {archivedReports.length === 0 ? (
+            <p>No archived reports.</p>
+          ) : (
+            <div className="reports">
+              {archivedReports.map((report) => (
+                <div
+                  className="report-card"
+                  key={report.id}
+                >
+                  <div>
+                    <h3>{report.title}</h3>
+
+                    <p>
+                      Period:{" "}
+                      {formatDate(
+                        report.startDate
+                      )}{" "}
+                      —{" "}
+                      {formatDate(
+                        report.endDate
+                      )}
+                    </p>
+
+                    <p>
+                      Status:{" "}
+                      <strong>
+                        {report.status}
+                      </strong>
+                    </p>
+
+                    <p>
+                      Total: ₹{report.total}
+                    </p>
+
+                    <p>
+                      <small>
+                        Archived report — history
+                        preserved
+                      </small>
+                    </p>
+                  </div>
+
                   <div className="actions">
                     <button
                       onClick={() =>
@@ -1423,12 +1645,12 @@ function App() {
                       Restore
                     </button>
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ================= APPROVER ANALYTICS ================= */}
 
