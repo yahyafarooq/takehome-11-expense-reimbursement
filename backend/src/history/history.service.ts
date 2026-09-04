@@ -1,12 +1,23 @@
 import prisma from "../lib/prisma";
 
-export async function getReportHistory(reportId: string) {
+export async function getReportHistory(
+  reportId: string,
+  user: { userId: string; role: "EMPLOYEE" | "APPROVER" }
+) {
   const report = await prisma.expenseReport.findUnique({
     where: { id: reportId },
   });
 
   if (!report) {
     throw new Error("Expense report not found");
+  }
+
+  if (user.role === "EMPLOYEE" && report.ownerId !== user.userId) {
+    throw new Error("You do not have permission to view history for this report");
+  }
+
+  if (user.role === "APPROVER" && report.status === "DRAFT" && report.ownerId !== user.userId) {
+    throw new Error("You do not have permission to view history for this report");
   }
 
   return prisma.reportHistory.findMany({
@@ -27,13 +38,24 @@ export async function getReportHistory(reportId: string) {
   });
 }
 
-export async function getReportComments(reportId: string) {
+export async function getReportComments(
+  reportId: string,
+  user: { userId: string; role: "EMPLOYEE" | "APPROVER" }
+) {
   const report = await prisma.expenseReport.findUnique({
     where: { id: reportId },
   });
 
   if (!report) {
     throw new Error("Expense report not found");
+  }
+
+  if (user.role === "EMPLOYEE" && report.ownerId !== user.userId) {
+    throw new Error("You do not have permission to view comments for this report");
+  }
+
+  if (user.role === "APPROVER" && report.status === "DRAFT" && report.ownerId !== user.userId) {
+    throw new Error("You do not have permission to view comments for this report");
   }
 
   return prisma.comment.findMany({

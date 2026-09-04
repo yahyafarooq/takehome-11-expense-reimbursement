@@ -23,31 +23,37 @@ export async function createExpenseLine(
     throw new Error("Expenses can only be added to a draft report");
   }
 
-  const expense = await prisma.expenseLine.create({
-    data: {
-      reportId,
-      expenseDate: new Date(input.expenseDate),
-      amount: input.amount,
-      category: input.category,
-      description: input.description,
-    },
-  });
+  if (input.amount <= 0) {
+    throw new Error("Amount must be greater than 0");
+  }
 
-  const total = await prisma.expenseLine.aggregate({
-    where: { reportId },
-    _sum: {
-      amount: true,
-    },
-  });
+  return prisma.$transaction(async (tx) => {
+    const expense = await tx.expenseLine.create({
+      data: {
+        reportId,
+        expenseDate: new Date(input.expenseDate),
+        amount: input.amount,
+        category: input.category,
+        description: input.description,
+      },
+    });
 
-  await prisma.expenseReport.update({
-    where: { id: reportId },
-    data: {
-      total: total._sum.amount ?? 0,
-    },
-  });
+    const total = await tx.expenseLine.aggregate({
+      where: { reportId },
+      _sum: {
+        amount: true,
+      },
+    });
 
-  return expense;
+    await tx.expenseReport.update({
+      where: { id: reportId },
+      data: {
+        total: total._sum.amount ?? 0,
+      },
+    });
+
+    return expense;
+  });
 }
 
 export async function updateExpenseLine(
@@ -77,6 +83,10 @@ export async function updateExpenseLine(
     throw new Error("Only draft reports can be edited");
   }
 
+  if (input.amount <= 0) {
+    throw new Error("Amount must be greater than 0");
+  }
+
   const expense = await prisma.expenseLine.findFirst({
     where: { id: expenseId, reportId },
   });
@@ -85,27 +95,29 @@ export async function updateExpenseLine(
     throw new Error("Expense line not found");
   }
 
-  const updated = await prisma.expenseLine.update({
-    where: { id: expenseId },
-    data: {
-      expenseDate: new Date(input.expenseDate),
-      amount: input.amount,
-      category: input.category,
-      description: input.description,
-    },
-  });
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.expenseLine.update({
+      where: { id: expenseId },
+      data: {
+        expenseDate: new Date(input.expenseDate),
+        amount: input.amount,
+        category: input.category,
+        description: input.description,
+      },
+    });
 
-  const aggregate = await prisma.expenseLine.aggregate({
-    where: { reportId },
-    _sum: { amount: true },
-  });
+    const aggregate = await tx.expenseLine.aggregate({
+      where: { reportId },
+      _sum: { amount: true },
+    });
 
-  await prisma.expenseReport.update({
-    where: { id: reportId },
-    data: { total: aggregate._sum.amount ?? 0 },
-  });
+    await tx.expenseReport.update({
+      where: { id: reportId },
+      data: { total: aggregate._sum.amount ?? 0 },
+    });
 
-  return updated;
+    return updated;
+  });
 }
 
 export async function deleteExpenseLine(
@@ -137,17 +149,19 @@ export async function deleteExpenseLine(
     throw new Error("Expense line not found");
   }
 
-  await prisma.expenseLine.delete({
-    where: { id: expenseId },
-  });
+  return prisma.$transaction(async (tx) => {
+    await tx.expenseLine.delete({
+      where: { id: expenseId },
+    });
 
-  const aggregate = await prisma.expenseLine.aggregate({
-    where: { reportId },
-    _sum: { amount: true },
-  });
+    const aggregate = await tx.expenseLine.aggregate({
+      where: { reportId },
+      _sum: { amount: true },
+    });
 
-  return prisma.expenseReport.update({
-    where: { id: reportId },
-    data: { total: aggregate._sum.amount ?? 0 },
+    return tx.expenseReport.update({
+      where: { id: reportId },
+      data: { total: aggregate._sum.amount ?? 0 },
+    });
   });
 }

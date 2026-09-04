@@ -18,17 +18,25 @@ export async function listReportHistory(
     }
 
     const history = await getReportHistory(
-      req.params.reportId as string
+      req.params.reportId as string,
+      req.user
     );
 
     return res.status(200).json({ history });
   } catch (error) {
-    return res.status(400).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch report history",
-    });
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to fetch report history";
+
+    if (message === "Expense report not found") {
+      return res.status(404).json({ message });
+    }
+    if (message.includes("permission")) {
+      return res.status(403).json({ message });
+    }
+
+    return res.status(400).json({ message });
   }
 }
 
@@ -44,17 +52,25 @@ export async function listReportComments(
     }
 
     const comments = await getReportComments(
-      req.params.reportId as string
+      req.params.reportId as string,
+      req.user
     );
 
     return res.status(200).json({ comments });
   } catch (error) {
-    return res.status(400).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch report comments",
-    });
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to fetch report comments";
+
+    if (message === "Expense report not found") {
+      return res.status(404).json({ message });
+    }
+    if (message.includes("permission")) {
+      return res.status(403).json({ message });
+    }
+
+    return res.status(400).json({ message });
   }
 }
 
@@ -88,11 +104,18 @@ export async function createReportComment(
       comment: result,
     });
   } catch (error) {
-    return res.status(400).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to add comment",
-    });
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to add comment";
+
+    if (message === "Expense report not found") {
+      return res.status(404).json({ message });
+    }
+    if (message.includes("permission")) {
+      return res.status(403).json({ message });
+    }
+
+    return res.status(400).json({ message });
   }
 }

@@ -7,7 +7,7 @@ const router = Router();
 router.get(
   "/",
   authenticate,
-  requireRole("EMPLOYEE", "APPROVER"),
+  requireRole("APPROVER"),
   getDashboardData
 );
 

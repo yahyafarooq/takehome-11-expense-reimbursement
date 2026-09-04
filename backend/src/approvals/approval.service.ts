@@ -80,6 +80,19 @@ export async function assignApprover(
     throw new Error("Invalid approver");
   }
 
+  const existing = await prisma.reportApprover.findUnique({
+    where: {
+      reportId_approverId: {
+        reportId,
+        approverId,
+      },
+    },
+  });
+
+  if (existing) {
+    throw new Error("Approver is already assigned to this report");
+  }
+
   return prisma.reportApprover.create({
     data: {
       reportId,
@@ -118,7 +131,7 @@ export async function approveReport(
 
   if (report.ownerId === approverId) {
     throw new Error(
-      "You cannot approve or reject your own report"
+      "The approver cannot approve/reject their own report"
     );
   }
 
@@ -189,7 +202,7 @@ export async function rejectReport(
 
   if (report.ownerId === approverId) {
     throw new Error(
-      "You cannot approve or reject your own report"
+      "The approver cannot approve/reject their own report"
     );
   }
 
@@ -375,10 +388,31 @@ export async function searchReports(
   };
 
   if (search?.trim()) {
-    where.title = {
-      contains: search.trim(),
-      mode: "insensitive",
-    };
+    const term = search.trim();
+    where.OR = [
+      {
+        title: {
+          contains: term,
+          mode: "insensitive",
+        },
+      },
+      {
+        owner: {
+          name: {
+            contains: term,
+            mode: "insensitive",
+          },
+        },
+      },
+      {
+        owner: {
+          email: {
+            contains: term,
+            mode: "insensitive",
+          },
+        },
+      },
+    ];
   }
 
   if (status) {
@@ -505,10 +539,24 @@ export async function bulkUpdateReports(
         });
       }
     } catch (error) {
+      const reportInfo = await prisma.expenseReport.findUnique({
+        where: { id: reportId },
+        include: {
+          owner: {
+            select: {
+              name: true,
+              email: true,
+            },
+          },
+        },
+      });
+
       results.push({
         reportId,
+        title: reportInfo?.title || "",
+        owner: reportInfo?.owner || null,
         success: false,
-        error:
+        reason:
           error instanceof Error
             ? error.message
             : "Failed to update report",

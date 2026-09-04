@@ -121,28 +121,41 @@ const CATEGORIES: ExpenseCategory[] = [
   "OTHER",
 ];
 
-function formatDate(value?: string | null) {
-  if (!value) return "-";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "-";
-  }
-
-  return date.toLocaleDateString();
+function formatMoney(value?: number | string | null) {
+  const num = Number(value) || 0;
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(num);
 }
 
-function inputDate(value?: string) {
-  if (!value) return "";
+function formatDate(dateString?: string | null) {
+  if (!dateString) return "-";
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-
+function inputDate(dateString?: string | null) {
+  if (!dateString) return new Date().toISOString().slice(0, 10);
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
   return date.toISOString().slice(0, 10);
+}
+
+function renderStatusBadge(status: string) {
+  const s = (status || "").toLowerCase();
+  return <span className={`status-badge ${s}`}>{status}</span>;
+}
+
+function renderCategoryBadge(category: ExpenseCategory) {
+  const c = (category || "").toLowerCase();
+  return <span className={`category-badge ${c}`}>{category}</span>;
 }
 
 function App() {
@@ -154,8 +167,14 @@ function App() {
     (localStorage.getItem("role") as Role) || "EMPLOYEE"
   );
 
+  /* Auth UI mode */
+  const [authMode, setAuthMode] = useState<"LOGIN" | "REGISTER">("LOGIN");
   const [email, setEmail] = useState("approver@example.com");
   const [password, setPassword] = useState("Password123");
+  const [regName, setRegName] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPassword, setRegPassword] = useState("");
+  const [regRole, setRegRole] = useState<Role>("EMPLOYEE");
 
   const [reports, setReports] = useState<Report[]>([]);
   const [archivedReports, setArchivedReports] = useState<Report[]>(
@@ -196,6 +215,7 @@ function App() {
   /* Goal 7 - Bulk actions */
   const [selectedReports, setSelectedReports] = useState<string[]>([]);
   const [bulkReason, setBulkReason] = useState("");
+  const [bulkResults, setBulkResults] = useState<any[] | null>(null);
 
   /* Goal 9 - Immutable history and comments */
   const [historyByReport, setHistoryByReport] = useState<
@@ -260,10 +280,34 @@ function App() {
     return config;
   });
 
+  api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (error.response?.status === 401 && token) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("role");
+        setToken("");
+        setMessage("Session expired. Please sign in again.");
+      }
+      return Promise.reject(error);
+    }
+  );
+
+  function fillDemoPreset(presetRole: Role) {
+    if (presetRole === "EMPLOYEE") {
+      setEmail("employee@example.com");
+      setPassword("Password123");
+    } else {
+      setEmail("approver@example.com");
+      setPassword("Password123");
+    }
+    setAuthMode("LOGIN");
+  }
+
   async function login() {
     try {
       const response = await api.post("/auth/login", {
-        email,
+        email: email.trim(),
         password,
       });
 
@@ -280,6 +324,42 @@ function App() {
     } catch (error: any) {
       setMessage(
         error.response?.data?.message || "Login failed"
+      );
+    }
+  }
+
+  async function registerUserAccount() {
+    if (!regName.trim() || !regEmail.trim() || !regPassword.trim()) {
+      setMessage("Please fill in all registration fields");
+      return;
+    }
+
+    try {
+      await api.post("/auth/register", {
+        name: regName.trim(),
+        email: regEmail.trim(),
+        password: regPassword.trim(),
+        role: regRole,
+      });
+
+      setMessage("Registration successful! Signing in...");
+
+      const loginRes = await api.post("/auth/login", {
+        email: regEmail.trim(),
+        password: regPassword.trim(),
+      });
+
+      const newToken = loginRes.data.token;
+      const newRole = loginRes.data.user.role as Role;
+
+      localStorage.setItem("token", newToken);
+      localStorage.setItem("role", newRole);
+
+      setToken(newToken);
+      setRole(newRole);
+    } catch (error: any) {
+      setMessage(
+        error.response?.data?.message || "Registration failed"
       );
     }
   }
@@ -354,7 +434,10 @@ function App() {
         sortOrder: searchSortOrder,
       };
 
-      if (searchTitle.trim()) params.title = searchTitle.trim();
+      if (searchTitle.trim()) {
+        params.search = searchTitle.trim();
+        params.title = searchTitle.trim();
+      }
       if (searchStatus) params.status = searchStatus;
       if (searchOwnerId) params.ownerId = searchOwnerId;
       if (searchApproverId) params.approverId = searchApproverId;
@@ -448,6 +531,25 @@ function App() {
     }
   }
 
+  function clearSearchFilters() {
+    setSearchTitle("");
+    setSearchStatus("");
+    setSearchOwnerId("");
+    setSearchApproverId("");
+    setSearchSortBy("submittedAt");
+    setSearchSortOrder("desc");
+    setSearchPage(1);
+    setSearchMode(false);
+    loadReports();
+  }
+
+  function selectAllSubmittedReports() {
+    const submittedIds = reports
+      .filter((r) => r.status === "SUBMITTED")
+      .map((r) => r.id);
+    setSelectedReports(submittedIds);
+  }
+
   async function bulkAction(action: "APPROVE" | "REJECT") {
     if (selectedReports.length === 0) {
       setMessage("Select at least one submitted report");
@@ -472,6 +574,7 @@ function App() {
       const successful = results.filter((item: any) => item.success).length;
       const failed = results.length - successful;
 
+      setBulkResults(results);
       setSelectedReports([]);
       setBulkReason("");
       setMessage(
@@ -987,43 +1090,80 @@ function App() {
       <div className="login-page">
         <div className="login-card">
           <h1>Expense Reimbursement</h1>
+          <p>Sign in or create an account to continue</p>
 
-          <p>Sign in to continue</p>
+          <div className="tab-group" style={{ marginBottom: "1rem" }}>
+            <button
+              className={authMode === "LOGIN" ? "active" : ""}
+              onClick={() => setAuthMode("LOGIN")}
+            >
+              Sign In
+            </button>
+            <button
+              className={authMode === "REGISTER" ? "active" : ""}
+              onClick={() => setAuthMode("REGISTER")}
+            >
+              Sign Up
+            </button>
+          </div>
 
-          <input
-            placeholder="Email"
-            value={email}
-            onChange={(e) =>
-              setEmail(e.target.value)
-            }
-          />
-
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) =>
-              setPassword(e.target.value)
-            }
-          />
-
-          <button onClick={login}>
-            Sign In
-          </button>
-
-          {message && (
-            <p className="message">
-              {message}
-            </p>
+          {authMode === "LOGIN" ? (
+            <>
+              <input
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button onClick={login}>Sign In</button>
+            </>
+          ) : (
+            <>
+              <input
+                placeholder="Full Name"
+                value={regName}
+                onChange={(e) => setRegName(e.target.value)}
+              />
+              <input
+                placeholder="Email Address"
+                value={regEmail}
+                onChange={(e) => setRegEmail(e.target.value)}
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={regPassword}
+                onChange={(e) => setRegPassword(e.target.value)}
+              />
+              <select
+                value={regRole}
+                onChange={(e) => setRegRole(e.target.value as Role)}
+              >
+                <option value="EMPLOYEE">Employee</option>
+                <option value="APPROVER">Approver</option>
+              </select>
+              <button onClick={registerUserAccount}>Create Account</button>
+            </>
           )}
 
-          <small>
-            Demo approver:
-            <br />
-            approver@example.com
-            <br />
-            Password: Password123
-          </small>
+          {message && <p className="message">{message}</p>}
+
+          <div className="demo-presets">
+            <small>Demo Quick Fill:</small>
+            <div>
+              <button onClick={() => fillDemoPreset("EMPLOYEE")}>
+                Employee Demo
+              </button>
+              <button onClick={() => fillDemoPreset("APPROVER")}>
+                Approver Demo
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1038,6 +1178,12 @@ function App() {
           <span className="role">
             {role}
           </span>
+
+          {role === "APPROVER" && (
+            <span className="alert-badge" title="Stale Approval Alerts">
+              🔔 {alerts.length} alert{alerts.length === 1 ? "" : "s"}
+            </span>
+          )}
         </div>
 
         <button onClick={logout}>
@@ -1066,21 +1212,21 @@ function App() {
             <div className="stat-card">
               <span>Reimbursements Due</span>
               <strong>
-                ₹{dashboard.summary.reimbursementsDue}
+                {formatMoney(dashboard.summary.reimbursementsDue)}
               </strong>
             </div>
 
             <div className="stat-card">
               <span>Approved This Week</span>
               <strong>
-                ₹{dashboard.summary.approvedThisWeek}
+                {formatMoney(dashboard.summary.approvedThisWeek)}
               </strong>
             </div>
 
             <div className="stat-card">
               <span>Paid This Week</span>
               <strong>
-                ₹{dashboard.summary.paidThisWeek}
+                {formatMoney(dashboard.summary.paidThisWeek)}
               </strong>
             </div>
           </section>
@@ -1257,6 +1403,7 @@ function App() {
             >
               Apply Filters
             </button>
+            <button onClick={clearSearchFilters}>Clear Filters</button>
           </div>
 
           {searchMode && (
@@ -1303,7 +1450,12 @@ function App() {
         <section className="panel">
           <div className="panel-header">
             <h2>Bulk Actions</h2>
-            <span>{selectedReports.length} selected</span>
+            <div className="actions">
+              <span>{selectedReports.length} selected</span>
+              <button onClick={selectAllSubmittedReports}>
+                Select All Submitted
+              </button>
+            </div>
           </div>
 
           <div className="form-row">
@@ -1331,6 +1483,27 @@ function App() {
               Clear Selection
             </button>
           </div>
+
+          {bulkResults && (
+            <div className="bulk-results" style={{ marginTop: "1rem" }}>
+              <h4>Bulk Action Breakdown</h4>
+              <ul>
+                {bulkResults.map((r: any) => (
+                  <li key={r.reportId}>
+                    Report #{r.reportId.slice(-6)}:{" "}
+                    {r.success ? (
+                      <span style={{ color: "#047857" }}>✓ Success</span>
+                    ) : (
+                      <span style={{ color: "#b91c1c" }}>
+                        ✗ Failed ({r.reason || "Error"})
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <button onClick={() => setBulkResults(null)}>Dismiss Breakdown</button>
+            </div>
+          )}
         </section>
       )}
 
@@ -1533,14 +1706,11 @@ function App() {
                     </p>
 
                     <p>
-                      Status:{" "}
-                      <strong>
-                        {report.status}
-                      </strong>
+                      Status: {renderStatusBadge(report.status)}
                     </p>
 
                     <p>
-                      Total: ₹{report.total}
+                      Total: <strong>{formatMoney(report.total)}</strong>
                     </p>
 
                     {report.submittedAt && (
@@ -1862,19 +2032,10 @@ function App() {
                               <>
                                 <div>
                                   <strong>
-                                    ₹
-                                    {
-                                      expense.amount
-                                    }
+                                    {formatMoney(expense.amount)}
                                   </strong>
 
-                                  <span>
-                                    {" "}
-                                    ·{" "}
-                                    {
-                                      expense.category
-                                    }
-                                  </span>
+                                  <span> · {renderCategoryBadge(expense.category)}</span>
 
                                   <p>
                                     {
@@ -2142,14 +2303,11 @@ function App() {
                     </p>
 
                     <p>
-                      Status:{" "}
-                      <strong>
-                        {report.status}
-                      </strong>
+                      Status: {renderStatusBadge(report.status)}
                     </p>
 
                     <p>
-                      Total: ₹{report.total}
+                      Total: {formatMoney(report.total)}
                     </p>
 
                     <p>
@@ -2189,12 +2347,11 @@ function App() {
               (item) => (
                 <div key={item.status}>
                   <strong>
-                    {item.status}
+                    {renderStatusBadge(item.status)}
                   </strong>
 
                   <span>
-                    {item.count} reports · ₹
-                    {item.total}
+                    {item.count} reports · {formatMoney(item.total)}
                   </span>
                 </div>
               )
@@ -2208,12 +2365,11 @@ function App() {
               (item) => (
                 <div key={item.category}>
                   <strong>
-                    {item.category}
+                    {renderCategoryBadge(item.category as ExpenseCategory)}
                   </strong>
 
                   <span>
-                    {item.count} expenses · ₹
-                    {item.total}
+                    {item.count} expenses · {formatMoney(item.total)}
                   </span>
                 </div>
               )
@@ -2235,7 +2391,7 @@ function App() {
                   </span>
 
                   <strong>
-                    ₹{week.total}
+                    {formatMoney(week.total)}
                   </strong>
                 </div>
               )
@@ -2264,7 +2420,7 @@ function App() {
               return (
                 <div
                   key={`chart-${week.weekStart}`}
-                  title={`${formatDate(week.weekStart)}: ₹${week.total}`}
+                  title={`${formatDate(week.weekStart)}: ${formatMoney(week.total)}`}
                   style={{
                     flex: 1,
                     display: "flex",
@@ -2275,7 +2431,7 @@ function App() {
                   }}
                 >
                   <strong style={{ fontSize: "12px" }}>
-                    ₹{week.total}
+                    {formatMoney(week.total)}
                   </strong>
                   <div
                     style={{

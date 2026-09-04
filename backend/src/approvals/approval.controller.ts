@@ -82,6 +82,7 @@ export async function searchExpenseReports(
 
     const {
       search,
+      title,
       status,
       ownerId,
       approverId,
@@ -156,10 +157,12 @@ export async function searchExpenseReports(
       }
     }
 
+    const searchTerm = search || title;
+
     const result = await searchReports({
-      ...(search
+      ...(searchTerm
         ? {
-            search: String(search),
+            search: String(searchTerm),
           }
         : {}),
 
