@@ -120,6 +120,10 @@ export async function rejectReport(
     throw new Error("Expense report not found");
   }
 
+  if (report.ownerId === approverId) {
+  throw new Error("You cannot approve or reject your own report");
+}
+
   if (report.status !== "SUBMITTED") {
     throw new Error("Only submitted reports can be rejected");
   }
@@ -155,5 +159,50 @@ export async function rejectReport(
     });
 
     return updated;
+  });
+}
+
+export async function markReportAsPaid(
+  reportId: string,
+  approverId: string
+) {
+  const report = await prisma.expenseReport.findUnique({
+    where: { id: reportId },
+  });
+
+  if (!report) {
+    throw new Error("Expense report not found");
+  }
+
+  if (report.status !== "APPROVED") {
+    throw new Error("Only approved reports can be marked as paid");
+  }
+
+  const approver = await prisma.user.findUnique({
+    where: { id: approverId },
+  });
+
+  if (!approver || approver.role !== "APPROVER") {
+    throw new Error("Only approvers can mark reports as paid");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updatedReport = await tx.expenseReport.update({
+      where: { id: reportId },
+      data: {
+        status: "PAID",
+      },
+    });
+
+    await tx.reportHistory.create({
+      data: {
+        reportId,
+        oldStatus: "APPROVED",
+        newStatus: "PAID",
+        actorId: approverId,
+      },
+    });
+
+    return updatedReport;
   });
 }

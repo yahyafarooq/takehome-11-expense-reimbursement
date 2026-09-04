@@ -5,6 +5,7 @@ import {
   assignApprover,
   approveReport,
   rejectReport,
+  markReportAsPaid,
 } from "./approval.service";
 
 export async function listSubmittedReports(
@@ -139,6 +140,30 @@ export async function rejectExpenseReport(
 
     return res.status(400).json({
       message,
+    });
+  }
+}
+
+export async function markReportPaid(
+  req: AuthenticatedRequest,
+  res: Response
+) {
+  try {
+    const reportId = req.params.reportId as string;
+    const approverId = req.user!.userId;
+
+    const report = await markReportAsPaid(reportId, approverId);
+
+    res.json({
+      message: "Report marked as paid",
+      report,
+    });
+  } catch (error) {
+    res.status(400).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to mark report as paid",
     });
   }
 }

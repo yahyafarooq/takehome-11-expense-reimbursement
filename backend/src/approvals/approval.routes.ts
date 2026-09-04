@@ -1,11 +1,11 @@
 import { Router } from "express";
-import { authenticate } from "../middleware/auth.middleware";
-import { requireRole } from "../middleware/role.middleware";
+import { authenticate, requireRole } from "../middleware/auth.middleware";
 import {
   listSubmittedReports,
   assignReportApprover,
   approveExpenseReport,
   rejectExpenseReport,
+  markReportPaid,
 } from "./approval.controller";
 
 const router = Router();
@@ -18,24 +18,31 @@ router.get(
 );
 
 router.post(
-  "/:reportId/assign",
+  "/:reportId/approvers",
   authenticate,
   requireRole("APPROVER"),
   assignReportApprover
 );
 
-router.post(
+router.patch(
   "/:reportId/approve",
   authenticate,
   requireRole("APPROVER"),
   approveExpenseReport
 );
 
-router.post(
+router.patch(
   "/:reportId/reject",
   authenticate,
   requireRole("APPROVER"),
   rejectExpenseReport
+);
+
+router.patch(
+  "/:reportId/pay",
+  authenticate,
+  requireRole("APPROVER"),
+  markReportPaid
 );
 
 export default router;
