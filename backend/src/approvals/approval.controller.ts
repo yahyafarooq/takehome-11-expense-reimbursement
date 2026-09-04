@@ -12,6 +12,24 @@ import {
   getApprovedReportsForPayment,
 } from "./approval.service";
 
+const VALID_STATUSES = [
+  "DRAFT",
+  "SUBMITTED",
+  "APPROVED",
+  "PAID",
+] as const;
+
+const VALID_SORT_FIELDS = [
+  "submittedAt",
+  "status",
+  "total",
+] as const;
+
+const VALID_SORT_ORDERS = [
+  "asc",
+  "desc",
+] as const;
+
 export async function listSubmittedReports(
   req: AuthenticatedRequest,
   res: Response
@@ -30,7 +48,10 @@ export async function listSubmittedReports(
     });
   } catch (error) {
     return res.status(500).json({
-      message: "Failed to fetch submitted reports",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to fetch submitted reports",
     });
   }
 }
@@ -40,6 +61,25 @@ export async function searchExpenseReports(
   res: Response
 ) {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Authentication required",
+      });
+    }
+
+    /*
+     * This endpoint is protected by the APPROVER role
+     * middleware in approval.routes.ts.
+     *
+     * Do not rely on the frontend to restrict access.
+     */
+    if (req.user.role !== "APPROVER") {
+      return res.status(403).json({
+        message:
+          "Only approvers can search all expense reports",
+      });
+    }
+
     const {
       search,
       status,
@@ -51,8 +91,78 @@ export async function searchExpenseReports(
       pageSize,
     } = req.query;
 
+    if (
+      status &&
+      !VALID_STATUSES.includes(
+        String(status) as (typeof VALID_STATUSES)[number]
+      )
+    ) {
+      return res.status(400).json({
+        message: "Invalid report status",
+      });
+    }
+
+    if (
+      sortBy &&
+      !VALID_SORT_FIELDS.includes(
+        String(sortBy) as (typeof VALID_SORT_FIELDS)[number]
+      )
+    ) {
+      return res.status(400).json({
+        message: "Invalid sort field",
+      });
+    }
+
+    if (
+      sortOrder &&
+      !VALID_SORT_ORDERS.includes(
+        String(sortOrder) as (typeof VALID_SORT_ORDERS)[number]
+      )
+    ) {
+      return res.status(400).json({
+        message: "Invalid sort order",
+      });
+    }
+
+    let parsedPage = 1;
+    let parsedPageSize = 10;
+
+    if (page !== undefined) {
+      parsedPage = Number(page);
+
+      if (
+        !Number.isInteger(parsedPage) ||
+        parsedPage < 1
+      ) {
+        return res.status(400).json({
+          message:
+            "page must be a positive integer",
+        });
+      }
+    }
+
+    if (pageSize !== undefined) {
+      parsedPageSize = Number(pageSize);
+
+      if (
+        !Number.isInteger(parsedPageSize) ||
+        parsedPageSize < 1 ||
+        parsedPageSize > 100
+      ) {
+        return res.status(400).json({
+          message:
+            "pageSize must be an integer between 1 and 100",
+        });
+      }
+    }
+
     const result = await searchReports({
-      ...(search ? { search: String(search) } : {}),
+      ...(search
+        ? {
+            search: String(search),
+          }
+        : {}),
+
       ...(status
         ? {
             status: String(status) as
@@ -62,8 +172,19 @@ export async function searchExpenseReports(
               | "PAID",
           }
         : {}),
-      ...(ownerId ? { ownerId: String(ownerId) } : {}),
-      ...(approverId ? { approverId: String(approverId) } : {}),
+
+      ...(ownerId
+        ? {
+            ownerId: String(ownerId),
+          }
+        : {}),
+
+      ...(approverId
+        ? {
+            approverId: String(approverId),
+          }
+        : {}),
+
       ...(sortBy
         ? {
             sortBy: String(sortBy) as
@@ -72,13 +193,17 @@ export async function searchExpenseReports(
               | "total",
           }
         : {}),
+
       ...(sortOrder
         ? {
-            sortOrder: String(sortOrder) as "asc" | "desc",
+            sortOrder: String(sortOrder) as
+              | "asc"
+              | "desc",
           }
         : {}),
-      ...(page ? { page: Number(page) } : {}),
-      ...(pageSize ? { pageSize: Number(pageSize) } : {}),
+
+      page: parsedPage,
+      pageSize: parsedPageSize,
     });
 
     return res.status(200).json(result);
@@ -105,7 +230,10 @@ export async function assignReportApprover(
 
     const { approverId } = req.body;
 
-    if (!approverId) {
+    if (
+      !approverId ||
+      typeof approverId !== "string"
+    ) {
       return res.status(400).json({
         message: "approverId is required",
       });
@@ -121,13 +249,11 @@ export async function assignReportApprover(
       assignment,
     });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to assign approver";
-
     return res.status(400).json({
-      message,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to assign approver",
     });
   }
 }
@@ -149,17 +275,16 @@ export async function approveExpenseReport(
     );
 
     return res.status(200).json({
-      message: "Expense report approved successfully",
+      message:
+        "Expense report approved successfully",
       report,
     });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to approve report";
-
     return res.status(400).json({
-      message,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to approve report",
     });
   }
 }
@@ -177,7 +302,10 @@ export async function rejectExpenseReport(
 
     const { reason } = req.body;
 
-    if (!reason || typeof reason !== "string" || !reason.trim()) {
+    if (
+      typeof reason !== "string" ||
+      !reason.trim()
+    ) {
       return res.status(400).json({
         message: "Rejection reason is required",
       });
@@ -190,17 +318,16 @@ export async function rejectExpenseReport(
     );
 
     return res.status(200).json({
-      message: "Expense report rejected successfully",
+      message:
+        "Expense report rejected successfully",
       report,
     });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to reject report";
-
     return res.status(400).json({
-      message,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to reject report",
     });
   }
 }
@@ -216,12 +343,9 @@ export async function markReportPaid(
       });
     }
 
-    const reportId = req.params.reportId as string;
-    const approverId = req.user.userId;
-
     const report = await markReportAsPaid(
-      reportId,
-      approverId
+      req.params.reportId as string,
+      req.user.userId
     );
 
     return res.status(200).json({
@@ -249,10 +373,10 @@ export async function listAssignedSubmittedReports(
       });
     }
 
-    const approverId = req.user.userId;
-
     const reports =
-      await getAssignedSubmittedReports(approverId);
+      await getAssignedSubmittedReports(
+        req.user.userId
+      );
 
     return res.status(200).json({
       reports,
@@ -278,35 +402,58 @@ export async function bulkUpdateExpenseReports(
       });
     }
 
-    const { reportIds, action, reason } = req.body;
+    const { reportIds, action, reason } =
+      req.body;
 
-    if (!Array.isArray(reportIds) || reportIds.length === 0) {
+    if (
+      !Array.isArray(reportIds) ||
+      reportIds.length === 0
+    ) {
       return res.status(400).json({
-        message: "reportIds must be a non-empty array",
+        message:
+          "reportIds must be a non-empty array",
       });
     }
 
-    if (action !== "APPROVE" && action !== "REJECT") {
+    if (
+      reportIds.some(
+        (id) => typeof id !== "string" || !id.trim()
+      )
+    ) {
       return res.status(400).json({
-        message: "action must be APPROVE or REJECT",
+        message:
+          "reportIds must contain valid report IDs",
+      });
+    }
+
+    if (
+      action !== "APPROVE" &&
+      action !== "REJECT"
+    ) {
+      return res.status(400).json({
+        message:
+          "action must be APPROVE or REJECT",
       });
     }
 
     if (
       action === "REJECT" &&
-      (!reason || typeof reason !== "string" || !reason.trim())
+      (typeof reason !== "string" ||
+        !reason.trim())
     ) {
       return res.status(400).json({
-        message: "Rejection reason is required",
+        message:
+          "Rejection reason is required",
       });
     }
 
-    const results = await bulkUpdateReports(
-      reportIds,
-      req.user.userId,
-      action,
-      reason
-    );
+    const results =
+      await bulkUpdateReports(
+        reportIds,
+        req.user.userId,
+        action,
+        reason
+      );
 
     return res.status(200).json({
       results,
@@ -332,7 +479,8 @@ export async function exportApprovedReportsCsv(
       });
     }
 
-    const reports = await getApprovedReportsForPayment();
+    const reports =
+      await getApprovedReportsForPayment();
 
     const header = [
       "Report ID",
@@ -359,10 +507,16 @@ export async function exportApprovedReportsCsv(
 
     const csv = [
       header.map(escapeCsv).join(","),
-      ...rows.map((row) => row.map(escapeCsv).join(",")),
+      ...rows.map((row) =>
+        row.map(escapeCsv).join(",")
+      ),
     ].join("\n");
 
-    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Type",
+      "text/csv; charset=utf-8"
+    );
+
     res.setHeader(
       "Content-Disposition",
       "attachment; filename=approved-reports.csv"
