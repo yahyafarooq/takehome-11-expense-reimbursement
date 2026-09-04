@@ -4,6 +4,9 @@ import authRoutes from "./auth/auth.routes";
 import reportRoutes from "./reports/report.routes";
 import expenseRoutes from "./reports/expense.routes";
 import approvalRoutes from "./approvals/approval.routes";
+import dashboardRoutes from "./dashboard/dashboard.routes";
+import historyRoutes from "./history/history.routes";
+import alertRoutes from "./alerts/alert.routes";
 
 const app = express();
 
@@ -18,5 +21,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/reports", expenseRoutes);
 app.use("/api/approvals", approvalRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/reports", historyRoutes);
+app.use("/api/alerts", alertRoutes);
 
 export default app;

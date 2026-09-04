@@ -11,6 +11,9 @@ export interface ReportSearchOptions {
   pageSize?: number;
 }
 
+/**
+ * Get all submitted, non-archived reports.
+ */
 export async function getSubmittedReports() {
   return prisma.expenseReport.findMany({
     where: {
@@ -26,7 +29,17 @@ export async function getSubmittedReports() {
         },
       },
       expenseLines: true,
-      approvers: true,
+      approvers: {
+        include: {
+          approver: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      },
     },
     orderBy: {
       submittedAt: "asc",
@@ -34,12 +47,17 @@ export async function getSubmittedReports() {
   });
 }
 
+/**
+ * Assign an approver to a submitted report.
+ */
 export async function assignApprover(
   reportId: string,
   approverId: string
 ) {
   const report = await prisma.expenseReport.findUnique({
-    where: { id: reportId },
+    where: {
+      id: reportId,
+    },
   });
 
   if (!report) {
@@ -47,11 +65,15 @@ export async function assignApprover(
   }
 
   if (report.status !== "SUBMITTED") {
-    throw new Error("Only submitted reports can be assigned");
+    throw new Error(
+      "Only submitted reports can be assigned"
+    );
   }
 
   const approver = await prisma.user.findUnique({
-    where: { id: approverId },
+    where: {
+      id: approverId,
+    },
   });
 
   if (!approver || approver.role !== "APPROVER") {
@@ -66,12 +88,25 @@ export async function assignApprover(
   });
 }
 
+/**
+ * Approve a submitted report.
+ *
+ * Server-side rules:
+ * - Report must exist.
+ * - Report must be SUBMITTED.
+ * - Approver must be assigned to the report.
+ * - Approver cannot approve their own report.
+ * - Status transition is SUBMITTED -> APPROVED.
+ * - History entry is immutable.
+ */
 export async function approveReport(
   reportId: string,
   approverId: string
 ) {
   const report = await prisma.expenseReport.findUnique({
-    where: { id: reportId },
+    where: {
+      id: reportId,
+    },
     include: {
       approvers: true,
     },
@@ -81,21 +116,34 @@ export async function approveReport(
     throw new Error("Expense report not found");
   }
 
+  if (report.ownerId === approverId) {
+    throw new Error(
+      "You cannot approve or reject your own report"
+    );
+  }
+
   if (report.status !== "SUBMITTED") {
-    throw new Error("Only submitted reports can be approved");
+    throw new Error(
+      "Only submitted reports can be approved"
+    );
   }
 
   const assigned = report.approvers.some(
-    (assignment) => assignment.approverId === approverId
+    (assignment) =>
+      assignment.approverId === approverId
   );
 
   if (!assigned) {
-    throw new Error("You are not assigned to this report");
+    throw new Error(
+      "You are not assigned to this report"
+    );
   }
 
   return prisma.$transaction(async (tx) => {
     const updated = await tx.expenseReport.update({
-      where: { id: reportId },
+      where: {
+        id: reportId,
+      },
       data: {
         status: "APPROVED",
       },
@@ -115,13 +163,21 @@ export async function approveReport(
   });
 }
 
+/**
+ * Reject a submitted report.
+ *
+ * Status transition:
+ * SUBMITTED -> DRAFT
+ */
 export async function rejectReport(
   reportId: string,
   approverId: string,
   reason: string
 ) {
   const report = await prisma.expenseReport.findUnique({
-    where: { id: reportId },
+    where: {
+      id: reportId,
+    },
     include: {
       approvers: true,
     },
@@ -132,28 +188,41 @@ export async function rejectReport(
   }
 
   if (report.ownerId === approverId) {
-  throw new Error("You cannot approve or reject your own report");
-}
+    throw new Error(
+      "You cannot approve or reject your own report"
+    );
+  }
 
   if (report.status !== "SUBMITTED") {
-    throw new Error("Only submitted reports can be rejected");
+    throw new Error(
+      "Only submitted reports can be rejected"
+    );
   }
 
   const assigned = report.approvers.some(
-    (assignment) => assignment.approverId === approverId
+    (assignment) =>
+      assignment.approverId === approverId
   );
 
   if (!assigned) {
-    throw new Error("You are not assigned to this report");
+    throw new Error(
+      "You are not assigned to this report"
+    );
   }
 
-  if (!reason.trim()) {
-    throw new Error("Rejection reason is required");
+  if (!reason || !reason.trim()) {
+    throw new Error(
+      "Rejection reason is required"
+    );
   }
+
+  const cleanReason = reason.trim();
 
   return prisma.$transaction(async (tx) => {
     const updated = await tx.expenseReport.update({
-      where: { id: reportId },
+      where: {
+        id: reportId,
+      },
       data: {
         status: "DRAFT",
       },
@@ -165,7 +234,7 @@ export async function rejectReport(
         actorId: approverId,
         oldStatus: "SUBMITTED",
         newStatus: "DRAFT",
-        reason: `Report rejected: ${reason}`,
+        reason: `Report rejected: ${cleanReason}`,
       },
     });
 
@@ -173,12 +242,20 @@ export async function rejectReport(
   });
 }
 
+/**
+ * Mark an approved report as paid.
+ *
+ * Status transition:
+ * APPROVED -> PAID
+ */
 export async function markReportAsPaid(
   reportId: string,
   approverId: string
 ) {
   const report = await prisma.expenseReport.findUnique({
-    where: { id: reportId },
+    where: {
+      id: reportId,
+    },
   });
 
   if (!report) {
@@ -186,24 +263,33 @@ export async function markReportAsPaid(
   }
 
   if (report.status !== "APPROVED") {
-    throw new Error("Only approved reports can be marked as paid");
+    throw new Error(
+      "Only approved reports can be marked as paid"
+    );
   }
 
   const approver = await prisma.user.findUnique({
-    where: { id: approverId },
+    where: {
+      id: approverId,
+    },
   });
 
   if (!approver || approver.role !== "APPROVER") {
-    throw new Error("Only approvers can mark reports as paid");
+    throw new Error(
+      "Only approvers can mark reports as paid"
+    );
   }
 
   return prisma.$transaction(async (tx) => {
-    const updatedReport = await tx.expenseReport.update({
-      where: { id: reportId },
-      data: {
-        status: "PAID",
-      },
-    });
+    const updatedReport =
+      await tx.expenseReport.update({
+        where: {
+          id: reportId,
+        },
+        data: {
+          status: "PAID",
+        },
+      });
 
     await tx.reportHistory.create({
       data: {
@@ -218,7 +304,12 @@ export async function markReportAsPaid(
   });
 }
 
-export async function getAssignedSubmittedReports(approverId: string) {
+/**
+ * Get submitted reports assigned to a specific approver.
+ */
+export async function getAssignedSubmittedReports(
+  approverId: string
+) {
   return prisma.expenseReport.findMany({
     where: {
       status: "SUBMITTED",
@@ -256,7 +347,12 @@ export async function getAssignedSubmittedReports(approverId: string) {
   });
 }
 
-export async function searchReports(options: ReportSearchOptions) {
+/**
+ * Search and paginate reports.
+ */
+export async function searchReports(
+  options: ReportSearchOptions
+) {
   const {
     search,
     status,
@@ -268,13 +364,19 @@ export async function searchReports(options: ReportSearchOptions) {
     pageSize = 10,
   } = options;
 
+  const safePage = Math.max(1, page);
+  const safePageSize = Math.min(
+    100,
+    Math.max(1, pageSize)
+  );
+
   const where: any = {
     archived: false,
   };
 
-  if (search) {
+  if (search?.trim()) {
     where.title = {
-      contains: search,
+      contains: search.trim(),
       mode: "insensitive",
     };
   }
@@ -295,54 +397,68 @@ export async function searchReports(options: ReportSearchOptions) {
     };
   }
 
-  const skip = (page - 1) * pageSize;
+  const skip =
+    (safePage - 1) * safePageSize;
 
   const orderBy: any = {
     [sortBy]: sortOrder,
   };
 
-  const [reports, total] = await prisma.$transaction([
-    prisma.expenseReport.findMany({
-      where,
-      include: {
-        owner: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
+  const [reports, total] =
+    await prisma.$transaction([
+      prisma.expenseReport.findMany({
+        where,
+        include: {
+          owner: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
           },
-        },
-        expenseLines: true,
-        approvers: {
-          include: {
-            approver: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
+          expenseLines: true,
+          approvers: {
+            include: {
+              approver: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
               },
             },
           },
         },
-      },
-      orderBy,
-      skip,
-      take: pageSize,
-    }),
-    prisma.expenseReport.count({ where }),
-  ]);
+        orderBy,
+        skip,
+        take: safePageSize,
+      }),
+
+      prisma.expenseReport.count({
+        where,
+      }),
+    ]);
 
   return {
     reports,
     pagination: {
-      page,
-      pageSize,
+      page: safePage,
+      pageSize: safePageSize,
       total,
-      totalPages: Math.ceil(total / pageSize),
+      totalPages: Math.ceil(
+        total / safePageSize
+      ),
     },
   };
 }
 
+/**
+ * Bulk approve/reject reports.
+ *
+ * Each report is processed independently so that
+ * one failure does not prevent the remaining reports
+ * from being processed.
+ */
 export async function bulkUpdateReports(
   reportIds: string[],
   approverId: string,
@@ -351,10 +467,22 @@ export async function bulkUpdateReports(
 ) {
   const results = [];
 
+  if (
+    action === "REJECT" &&
+    (!reason || !reason.trim())
+  ) {
+    throw new Error(
+      "Rejection reason is required"
+    );
+  }
+
   for (const reportId of reportIds) {
     try {
       if (action === "APPROVE") {
-        const report = await approveReport(reportId, approverId);
+        const report = await approveReport(
+          reportId,
+          approverId
+        );
 
         results.push({
           reportId,
@@ -363,14 +491,10 @@ export async function bulkUpdateReports(
           report,
         });
       } else {
-        if (!reason || !reason.trim()) {
-          throw new Error("Rejection reason is required");
-        }
-
         const report = await rejectReport(
           reportId,
           approverId,
-          reason
+          reason!.trim()
         );
 
         results.push({
@@ -395,6 +519,9 @@ export async function bulkUpdateReports(
   return results;
 }
 
+/**
+ * Get approved reports waiting for payment.
+ */
 export async function getApprovedReportsForPayment() {
   return prisma.expenseReport.findMany({
     where: {
