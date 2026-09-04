@@ -3,6 +3,7 @@ import {
   register,
   login,
   getCurrentUser,
+  listApprovers,
 } from "./auth.controller";
 import { requireRole } from "../middleware/role.middleware";
 import { authenticate } from "../middleware/auth.middleware";
@@ -10,8 +11,11 @@ import { authenticate } from "../middleware/auth.middleware";
 const router = Router();
 
 router.post("/register", register);
+
 router.post("/login", login);
+
 router.get("/me", authenticate, getCurrentUser);
+
 router.get(
   "/approver-test",
   authenticate,
@@ -24,14 +28,10 @@ router.get(
 );
 
 router.get(
-  "/approver-test",
+  "/approvers",
   authenticate,
   requireRole("APPROVER"),
-  (_req, res) => {
-    res.json({
-      message: "Approver access granted",
-    });
-  }
+  listApprovers
 );
 
 export default router;

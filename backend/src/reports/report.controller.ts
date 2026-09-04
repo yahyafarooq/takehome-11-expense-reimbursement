@@ -70,8 +70,23 @@ export async function getMyReports(
       },
     });
 
+    const archivedReports =
+      await prisma.expenseReport.findMany({
+        where: {
+          ownerId: req.user.userId,
+          archived: true,
+        },
+        include: {
+          expenseLines: true,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+
     return res.status(200).json({
       reports,
+      archivedReports,
     });
   } catch (error) {
     return res.status(500).json({

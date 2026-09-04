@@ -78,3 +78,19 @@ export async function loginUser(email: string, password: string) {
     },
   };
 }
+
+export async function getApprovers() {
+  return prisma.user.findMany({
+    where: {
+      role: "APPROVER",
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+    orderBy: {
+      name: "asc",
+    },
+  });
+}
