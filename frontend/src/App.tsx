@@ -56,6 +56,30 @@ interface Approver {
   email: string;
 }
 
+interface HistoryEntry {
+  id: string;
+  oldStatus?: string | null;
+  newStatus?: string | null;
+  reason?: string | null;
+  createdAt: string;
+  actor: {
+    id: string;
+    name: string;
+    email: string;
+  };
+}
+
+interface CommentEntry {
+  id: string;
+  comment: string;
+  createdAt: string;
+  author: {
+    id: string;
+    name: string;
+    email: string;
+  };
+}
+
 interface Dashboard {
   summary: {
     awaitingApproval: number;
@@ -150,6 +174,41 @@ function App() {
     Record<string, string>
   >({});
 
+  /* Goal 6 - Server-side search/filter/sort/pagination */
+  const [searchTitle, setSearchTitle] = useState("");
+  const [searchStatus, setSearchStatus] = useState("");
+  const [searchOwnerId, setSearchOwnerId] = useState("");
+  const [searchApproverId, setSearchApproverId] = useState("");
+  const [searchSortBy, setSearchSortBy] = useState<
+    "submittedAt" | "status" | "total"
+  >("submittedAt");
+  const [searchSortOrder, setSearchSortOrder] = useState<"asc" | "desc">("desc");
+  const [searchPage, setSearchPage] = useState(1);
+  const [searchPageSize, setSearchPageSize] = useState(10);
+  const [searchPagination, setSearchPagination] = useState({
+    page: 1,
+    pageSize: 10,
+    total: 0,
+    totalPages: 0,
+  });
+  const [searchMode, setSearchMode] = useState(false);
+
+  /* Goal 7 - Bulk actions */
+  const [selectedReports, setSelectedReports] = useState<string[]>([]);
+  const [bulkReason, setBulkReason] = useState("");
+
+  /* Goal 9 - Immutable history and comments */
+  const [historyByReport, setHistoryByReport] = useState<
+    Record<string, HistoryEntry[]>
+  >({});
+  const [commentsByReport, setCommentsByReport] = useState<
+    Record<string, CommentEntry[]>
+  >({});
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [expandedHistory, setExpandedHistory] = useState<
+    Record<string, boolean>
+  >({});
+
   /* Create report */
   const [title, setTitle] = useState("");
   const [startDate, setStartDate] = useState(
@@ -240,6 +299,11 @@ function App() {
   async function loadReports() {
     try {
       if (role === "APPROVER") {
+        if (searchMode) {
+          await loadSearch(searchPage);
+          return;
+        }
+
         const endpoint =
           queue === "ASSIGNED"
             ? "/approvals/submitted/assigned"
@@ -275,6 +339,183 @@ function App() {
       setMessage(
         error.response?.data?.message ||
           "Failed to load approvers"
+      );
+    }
+  }
+
+  async function loadSearch(page = searchPage) {
+    if (role !== "APPROVER") return;
+
+    try {
+      const params: Record<string, string | number> = {
+        page,
+        pageSize: searchPageSize,
+        sortBy: searchSortBy,
+        sortOrder: searchSortOrder,
+      };
+
+      if (searchTitle.trim()) params.title = searchTitle.trim();
+      if (searchStatus) params.status = searchStatus;
+      if (searchOwnerId) params.ownerId = searchOwnerId;
+      if (searchApproverId) params.approverId = searchApproverId;
+
+      const response = await api.get("/approvals/search", { params });
+
+      setReports(response.data.reports || []);
+      setArchivedReports([]);
+      setSearchPagination(
+        response.data.pagination || {
+          page,
+          pageSize: searchPageSize,
+          total: 0,
+          totalPages: 0,
+        }
+      );
+      setSearchPage(page);
+    } catch (error: any) {
+      setMessage(
+        error.response?.data?.message || "Failed to search reports"
+      );
+    }
+  }
+
+  async function loadHistory(reportId: string) {
+    try {
+      const response = await api.get(`/reports/${reportId}/history`);
+      setHistoryByReport((current) => ({
+        ...current,
+        [reportId]: response.data.history || [],
+      }));
+    } catch (error: any) {
+      setMessage(
+        error.response?.data?.message || "Failed to load report history"
+      );
+    }
+  }
+
+  async function loadComments(reportId: string) {
+    try {
+      const response = await api.get(`/reports/${reportId}/comments`);
+      setCommentsByReport((current) => ({
+        ...current,
+        [reportId]: response.data.comments || [],
+      }));
+    } catch (error: any) {
+      setMessage(
+        error.response?.data?.message || "Failed to load comments"
+      );
+    }
+  }
+
+  async function addComment(reportId: string) {
+    const comment = (commentDrafts[reportId] || "").trim();
+
+    if (!comment) {
+      setMessage("Comment cannot be empty");
+      return;
+    }
+
+    try {
+      await api.post(`/reports/${reportId}/comments`, { comment });
+
+      setCommentDrafts((current) => ({
+        ...current,
+        [reportId]: "",
+      }));
+
+      await loadComments(reportId);
+      setMessage("Comment added");
+    } catch (error: any) {
+      setMessage(
+        error.response?.data?.message || "Failed to add comment"
+      );
+    }
+  }
+
+  async function toggleHistory(reportId: string) {
+    const next = !expandedHistory[reportId];
+
+    setExpandedHistory((current) => ({
+      ...current,
+      [reportId]: next,
+    }));
+
+    if (next) {
+      await Promise.all([
+        loadHistory(reportId),
+        loadComments(reportId),
+      ]);
+    }
+  }
+
+  async function bulkAction(action: "APPROVE" | "REJECT") {
+    if (selectedReports.length === 0) {
+      setMessage("Select at least one submitted report");
+      return;
+    }
+
+    if (action === "REJECT" && !bulkReason.trim()) {
+      setMessage("Rejection reason is required");
+      return;
+    }
+
+    try {
+      const response = await api.patch("/approvals/bulk", {
+        reportIds: selectedReports,
+        action,
+        ...(action === "REJECT"
+          ? { reason: bulkReason.trim() }
+          : {}),
+      });
+
+      const results = response.data.results || [];
+      const successful = results.filter((item: any) => item.success).length;
+      const failed = results.length - successful;
+
+      setSelectedReports([]);
+      setBulkReason("");
+      setMessage(
+        `Bulk ${action.toLowerCase()} complete: ${successful} succeeded, ${failed} failed`
+      );
+
+      await loadReports();
+      await loadDashboard();
+    } catch (error: any) {
+      setMessage(
+        error.response?.data?.message || "Bulk action failed"
+      );
+    }
+  }
+
+  function toggleReportSelection(reportId: string) {
+    setSelectedReports((current) =>
+      current.includes(reportId)
+        ? current.filter((id) => id !== reportId)
+        : [...current, reportId]
+    );
+  }
+
+  async function downloadCsv() {
+    try {
+      const response = await api.get("/approvals/export/approved", {
+        responseType: "blob",
+      });
+
+      const blobUrl = window.URL.createObjectURL(
+        new Blob([response.data], { type: "text/csv" })
+      );
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = "approved-awaiting-payment.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+
+      setMessage("CSV export downloaded");
+    } catch (error: any) {
+      setMessage(
+        error.response?.data?.message || "Failed to export CSV"
       );
     }
   }
@@ -892,7 +1133,209 @@ function App() {
         </>
       )}
 
+      {/* ================= GOAL 6 / 7 SEARCH + BULK ================= */}
+
+      {role === "APPROVER" && (
+        <section className="panel">
+          <div className="panel-header">
+            <h2>Find Reports</h2>
+            <div className="actions">
+              <button
+                onClick={() => {
+                  setSearchMode(false);
+                  setSearchPage(1);
+                  loadReports();
+                }}
+              >
+                Queue
+              </button>
+              <button
+                onClick={() => {
+                  setSearchMode(true);
+                  setSearchPage(1);
+                  loadSearch(1);
+                }}
+              >
+                Search
+              </button>
+              <button onClick={downloadCsv}>
+                Export Approved CSV
+              </button>
+            </div>
+          </div>
+
+          <div className="form-row">
+            <input
+              placeholder="Search title..."
+              value={searchTitle}
+              onChange={(e) => setSearchTitle(e.target.value)}
+            />
+
+            <select
+              value={searchOwnerId}
+              onChange={(e) => setSearchOwnerId(e.target.value)}
+            >
+              <option value="">All owners</option>
+              {Array.from(
+                new Map(
+                  reports
+                    .filter((report) => report.owner?.id)
+                    .map((report) => [report.owner!.id, report.owner!])
+                ).values()
+              ).map((owner) => (
+                <option key={owner.id} value={owner.id}>
+                  {owner.name} ({owner.email})
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={searchStatus}
+              onChange={(e) => setSearchStatus(e.target.value)}
+            >
+              <option value="">All statuses</option>
+              <option value="DRAFT">Draft</option>
+              <option value="SUBMITTED">Submitted</option>
+              <option value="APPROVED">Approved</option>
+              <option value="PAID">Paid</option>
+            </select>
+
+            <select
+              value={searchApproverId}
+              onChange={(e) => setSearchApproverId(e.target.value)}
+            >
+              <option value="">All approvers</option>
+              {approvers.map((approver) => (
+                <option key={approver.id} value={approver.id}>
+                  {approver.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={searchSortBy}
+              onChange={(e) =>
+                setSearchSortBy(
+                  e.target.value as "submittedAt" | "status" | "total"
+                )
+              }
+            >
+              <option value="submittedAt">Sort: Submitted</option>
+              <option value="status">Sort: Status</option>
+              <option value="total">Sort: Total</option>
+            </select>
+
+            <select
+              value={searchSortOrder}
+              onChange={(e) =>
+                setSearchSortOrder(e.target.value as "asc" | "desc")
+              }
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+
+            <select
+              value={searchPageSize}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setSearchPageSize(value);
+                setSearchPage(1);
+              }}
+            >
+              <option value={10}>10 / page</option>
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
+
+            <button
+              onClick={() => {
+                setSearchMode(true);
+                loadSearch(1);
+              }}
+            >
+              Apply Filters
+            </button>
+          </div>
+
+          {searchMode && (
+            <>
+              <p>
+                Total matches: <strong>{searchPagination.total}</strong>
+              </p>
+
+              <div className="actions">
+                <button
+                  disabled={searchPage <= 1}
+                  onClick={() => loadSearch(searchPage - 1)}
+                >
+                  Previous
+                </button>
+
+                <span>
+                  Page {searchPagination.page} of{" "}
+                  {searchPagination.totalPages || 1}
+                </span>
+
+                <button
+                  disabled={
+                    searchPage >= searchPagination.totalPages
+                  }
+                  onClick={() => loadSearch(searchPage + 1)}
+                >
+                  Next
+                </button>
+              </div>
+            </>
+          )}
+
+          {!searchMode && (
+            <p>
+              Use Search for server-side title, status, approver,
+              sorting and pagination.
+            </p>
+          )}
+        </section>
+      )}
+
+      {role === "APPROVER" && (
+        <section className="panel">
+          <div className="panel-header">
+            <h2>Bulk Actions</h2>
+            <span>{selectedReports.length} selected</span>
+          </div>
+
+          <div className="form-row">
+            <input
+              placeholder="Rejection reason for bulk reject"
+              value={bulkReason}
+              onChange={(e) => setBulkReason(e.target.value)}
+            />
+
+            <button
+              onClick={() => bulkAction("APPROVE")}
+              disabled={selectedReports.length === 0}
+            >
+              Bulk Approve
+            </button>
+
+            <button
+              onClick={() => bulkAction("REJECT")}
+              disabled={selectedReports.length === 0}
+            >
+              Bulk Reject
+            </button>
+
+            <button onClick={() => setSelectedReports([])}>
+              Clear Selection
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* ================= EMPLOYEE CREATE REPORT ================= */}
+
 
       {role === "EMPLOYEE" && (
         <section className="panel">
@@ -985,6 +1428,17 @@ function App() {
                 className="report-card"
                 key={report.id}
               >
+                {role === "APPROVER" && report.status === "SUBMITTED" && (
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selectedReports.includes(report.id)}
+                      onChange={() => toggleReportSelection(report.id)}
+                    />
+                    Select for bulk action
+                  </label>
+                )}
+
                 {/* ================= REPORT HEADER ================= */}
 
                 {editingReportId === report.id ? (
@@ -1535,6 +1989,78 @@ function App() {
                     </div>
                   )}
 
+                {/* ================= GOAL 9 HISTORY + COMMENTS ================= */}
+
+                <div className="actions">
+                  <button onClick={() => toggleHistory(report.id)}>
+                    {expandedHistory[report.id]
+                      ? "Hide History"
+                      : "History & Comments"}
+                  </button>
+                </div>
+
+                {expandedHistory[report.id] && (
+                  <div className="panel">
+                    <h4>Immutable Status History</h4>
+
+                    {(historyByReport[report.id] || []).length === 0 ? (
+                      <p>No history entries.</p>
+                    ) : (
+                      <div className="breakdown">
+                        {(historyByReport[report.id] || []).map((entry) => (
+                          <div key={entry.id}>
+                            <strong>
+                              {entry.oldStatus || "START"} →{" "}
+                              {entry.newStatus || "-"}
+                            </strong>
+                            <span>
+                              {" "}
+                              · {entry.actor.name} ·{" "}
+                              {formatDate(entry.createdAt)}
+                              {entry.reason
+                                ? ` · Reason: ${entry.reason}`
+                                : ""}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <h4>Comments</h4>
+
+                    {(commentsByReport[report.id] || []).length === 0 ? (
+                      <p>No comments yet.</p>
+                    ) : (
+                      (commentsByReport[report.id] || []).map((item) => (
+                        <div key={item.id}>
+                          <strong>{item.author.name}</strong>
+                          <span>
+                            {" "}
+                            · {formatDate(item.createdAt)}
+                          </span>
+                          <p>{item.comment}</p>
+                        </div>
+                      ))
+                    )}
+
+                    <div className="form-row">
+                      <input
+                        placeholder="Add a comment..."
+                        value={commentDrafts[report.id] || ""}
+                        onChange={(e) =>
+                          setCommentDrafts((current) => ({
+                            ...current,
+                            [report.id]: e.target.value,
+                          }))
+                        }
+                      />
+                      <button onClick={() => addComment(report.id)}>
+                        Add Comment
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* ================= APPROVER ACTIONS ================= */}
 
                 {role === "APPROVER" && (
@@ -1714,6 +2240,62 @@ function App() {
                 </div>
               )
             )}
+          </div>
+
+          <h2>Paid Trend</h2>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-end",
+              gap: "10px",
+              minHeight: "180px",
+              padding: "16px 0",
+            }}
+          >
+            {dashboard.paidPerWeek.map((week) => {
+              const max = Math.max(
+                ...dashboard.paidPerWeek.map((item) => Number(item.total) || 0),
+                1
+              );
+              const height =
+                Math.max((Number(week.total) / max) * 140, 4);
+
+              return (
+                <div
+                  key={`chart-${week.weekStart}`}
+                  title={`${formatDate(week.weekStart)}: ₹${week.total}`}
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "flex-end",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <strong style={{ fontSize: "12px" }}>
+                    ₹{week.total}
+                  </strong>
+                  <div
+                    style={{
+                      width: "100%",
+                      maxWidth: "48px",
+                      height: `${height}px`,
+                      borderRadius: "6px 6px 2px 2px",
+                      background: "currentColor",
+                      opacity: 0.75,
+                    }}
+                  />
+                  <small>
+                    {new Date(week.weekStart).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </small>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
