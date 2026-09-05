@@ -95,6 +95,43 @@ export async function getMyReports(
   }
 }
 
+export async function getReportById(
+  req: AuthenticatedRequest,
+  res: Response
+) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    const report = await prisma.expenseReport.findUnique({
+      where: { id: req.params.reportId as string },
+      include: {
+        expenseLines: true,
+        owner: { select: { id: true, name: true, email: true } },
+        approvers: {
+          include: {
+            approver: { select: { id: true, name: true, email: true } },
+          },
+        },
+      },
+    });
+
+    if (!report) {
+      return res.status(404).json({ message: "Report not found" });
+    }
+
+    // IDOR check: employees can only see their own reports
+    if (req.user.role === "EMPLOYEE" && report.ownerId !== req.user.userId) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    return res.status(200).json({ report });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to fetch report" });
+  }
+}
+
 export async function submitExpenseReport(
   req: AuthenticatedRequest,
   res: Response

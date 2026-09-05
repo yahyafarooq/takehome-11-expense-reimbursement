@@ -7,6 +7,7 @@ import { requireRole } from "../middleware/role.middleware";
 import {
   createExpenseReport,
   getMyReports,
+  getReportById,
   submitExpenseReport,
   updateExpenseReport,
   archiveExpenseReport,
@@ -27,6 +28,13 @@ router.get(
   authenticate,
   requireRole("EMPLOYEE", "APPROVER"),
   getMyReports
+);
+
+router.get(
+  "/:reportId",
+  authenticate,
+  requireRole("EMPLOYEE", "APPROVER"),
+  getReportById
 );
 
 router.post(
