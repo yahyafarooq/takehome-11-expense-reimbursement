@@ -102,11 +102,15 @@ export async function addReportComment(
 
   const isOwner = report.ownerId === authorId;
 
+  const isApproverReviewer =
+    author.role === "APPROVER" &&
+    (report.status !== "DRAFT" || isOwner);
+
   const isAssignedApprover = report.approvers.some(
     (assignment) => assignment.approverId === authorId
   );
 
-  if (!isOwner && !isAssignedApprover) {
+  if (!isOwner && !isApproverReviewer && !isAssignedApprover) {
     throw new Error(
       "You do not have permission to comment on this report"
     );

@@ -11,7 +11,7 @@ export async function getAlerts(approverId: string) {
 
   const returnThreshold = new Date(now);
   returnThreshold.setDate(
-    returnThreshold.getDate() - STALE_DAYS - RETURN_DAYS
+    returnThreshold.getDate() - RETURN_DAYS
   );
 
   const reports = await prisma.expenseReport.findMany({

@@ -141,12 +141,13 @@ export async function approveReport(
     );
   }
 
+  const hasAssignedApprovers = report.approvers.length > 0;
   const assigned = report.approvers.some(
     (assignment) =>
       assignment.approverId === approverId
   );
 
-  if (!assigned) {
+  if (hasAssignedApprovers && !assigned) {
     throw new Error(
       "You are not assigned to this report"
     );
@@ -212,12 +213,13 @@ export async function rejectReport(
     );
   }
 
+  const hasAssignedApprovers = report.approvers.length > 0;
   const assigned = report.approvers.some(
     (assignment) =>
       assignment.approverId === approverId
   );
 
-  if (!assigned) {
+  if (hasAssignedApprovers && !assigned) {
     throw new Error(
       "You are not assigned to this report"
     );
@@ -439,7 +441,7 @@ export async function searchReports(
   };
 
   const [reports, total] =
-    await prisma.$transaction([
+    await Promise.all([
       prisma.expenseReport.findMany({
         where,
         include: {
